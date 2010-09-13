@@ -1,0 +1,76 @@
+#!/usr/bin/env python
+
+# "svn log" replacement that includes the diff for each revision
+
+import os, re, sys, subprocess
+from subprocess import PIPE
+from optparse import OptionParser
+
+def parse_args():
+    parser = OptionParser("usage: %prog [options]")
+    options, args = parser.parse_args()
+    
+    if len(args) != 0:
+        parser.error("no arguments are needed")
+    
+    return options, args
+
+def read_cmd(cmd):
+    return subprocess.Popen(cmd, stdout=PIPE).communicate()[0]
+
+def main(options, args):
+    # Get the current version number
+    #latest_revision = int(re.search(
+    #    r'Last Changed Rev: (?P<revision>\d+)',
+    #    read_cmd(['svn', 'info'])
+    #    ).groupdict()['revision']
+    #)
+    
+    # Make an output pipe to less
+    less = subprocess.Popen('less', shell=False, stdin=PIPE)
+    
+    # Start reading the SVN log
+    log = subprocess.Popen(['svn', 'log'], stdout=PIPE)
+    dash_line = log.stdout.readline()
+    
+    try:
+        while True:
+            # Go in reverse chronological order, diffing each pair of revisions until
+            # we get to revision 1
+            metadata_line = log.stdout.readline()
+            blank_line = log.stdout.readline()
+            
+            comment_lines = []
+            while True:
+                line = log.stdout.readline()
+                if re.match('^-+$', line):
+                    # A line of dashes, indicates start of next commit log
+                    dash_line = line
+                    break
+                else:
+                    comment_lines.append(line)
+            
+            revision = int(
+                re.search(r'^r(?P<revision>\d+)', metadata_line).groupdict()['revision']
+            )
+            
+            # Write the log for the revision
+            less.stdin.write(dash_line)
+            less.stdin.write(metadata_line)
+            less.stdin.write(blank_line)
+            less.stdin.write('\n'.join(comment_lines))
+            
+            # Write the diff for the revision
+            less.stdin.write('\n')
+            less.stdin.write(read_cmd(['svn', 'diff', '-r%d:%d' % (revision - 1, revision)]))
+            less.stdin.write('\n')
+    
+    except IOError:
+        # Ctrl-C, or 'q' from user
+        pass
+    
+    less.stdin.close()
+
+if __name__ == '__main__':
+    options, args = parse_args()
+    main(options, args)
